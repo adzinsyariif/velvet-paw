@@ -1,9 +1,13 @@
-// config.js — shared constants, palette and small math helpers for Velvet Paw.
-// Everything else imports from here so tuning lives in exactly one place.
+// config.js — the museum's rulebook: canvas size, movement and vision tuning
+// for Velvet and the night watch, the house palette, and the small geometry
+// helpers every other module borrows. One home for every magic number, so
+// balancing the heist never means hunting through the whole codebase.
 
 export const VIEW = { w: 1280, h: 800 };
 export const HUD_H = 56;
 
+// Velvet: quick on bare marble, a whisper on carpet, and only audible at all
+// while running — the two noise radii are what guards actually react to.
 export const PLAYER = {
   radius: 13,
   runSpeed: 174,
@@ -13,6 +17,8 @@ export const PLAYER = {
   noiseRunCarpet: 44,
 };
 
+// The night watch: how far and how wide a flashlight reaches, how quickly
+// suspicion ripens into a chase, and how long a chase remembers its quarry.
 export const GUARD = {
   radius: 14,
   patrolSpeed: 68,
@@ -27,6 +33,7 @@ export const GUARD = {
   chaseMemorySec: 3.4,
 };
 
+// Midnight blue, brass and velvet red: the whole museum in one palette.
 export const PALETTE = {
   floor: '#26304f',
   floorAlt: '#222b47',
@@ -65,49 +72,66 @@ export const PALETTE = {
   warn: '#ffb347',
 };
 
-export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+const FULL_TURN = Math.PI * 2;
+
+// Pin a value inside [lo, hi]; the workhorse behind meters and mixes.
+export function clamp(value, lo, hi) {
+  if (value < lo) return lo;
+  if (value > hi) return hi;
+  return value;
 }
 
+// Straight-line blend between two values at fraction t.
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+// Euclidean gap between two points on the hall floor.
 export function distance(x1, y1, x2, y2) {
-  return Math.hypot(x2 - x1, y2 - y1);
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
-// Smallest signed difference between two angles, in (-PI, PI].
+// The shortest signed rotation from one heading to another, in (-PI, PI].
+// Positive means the target lies counterclockwise... in screen terms, the
+// turn a guard's flashlight should take so it never swings the long way round.
 export function angleDelta(from, to) {
-  let d = (to - from) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return d;
+  let delta = (to - from) % FULL_TURN;
+  if (delta > Math.PI) delta -= FULL_TURN;
+  else if (delta < -Math.PI) delta += FULL_TURN;
+  return delta;
 }
 
+// Rotate a heading toward a target, travelling at most maxStep radians.
 export function turnToward(current, target, maxStep) {
-  const d = angleDelta(current, target);
-  if (Math.abs(d) <= maxStep) return target;
-  return current + Math.sign(d) * maxStep;
+  const delta = angleDelta(current, target);
+  if (Math.abs(delta) <= maxStep) return target;
+  return current + Math.sign(delta) * maxStep;
 }
 
-// Deterministic RNG (mulberry32) so staged screenshots are reproducible.
+// mulberry32: a tiny seeded random source. Staged scenes ask for it by seed
+// so a screenshot taken today is the same screenshot taken tomorrow.
 export function makeRng(seed) {
-  let a = seed >>> 0;
-  return function rng() {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  let state = seed >>> 0;
+  return function nextRandom() {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-export function pointInRect(x, y, r) {
-  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+// Inclusive containment: a point exactly on a rect's edge counts as inside,
+// which is what lets Velvet slip along a carpet's very border.
+export function pointInRect(x, y, rect) {
+  return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
+// First-match scan over a list of rects (carpet zones, mostly).
 export function pointInAnyRect(x, y, rects) {
-  for (const r of rects) if (pointInRect(x, y, r)) return true;
+  for (const rect of rects) {
+    if (pointInRect(x, y, rect)) return true;
+  }
   return false;
 }

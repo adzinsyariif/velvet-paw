@@ -1,135 +1,181 @@
-// audio.js — every sound is synthesized with WebAudio; there are no audio files.
-// The context is created lazily and unlocked on the first key press or click,
-// which is what browser autoplay policies require.
+// audio.js — a heist scored entirely by oscillators. No audio files exist:
+// every footstep, chime and alarm is synthesised with WebAudio at the moment
+// it is heard. The context stays locked until the player's first key press
+// or click, which is exactly what browser autoplay policies demand.
 
 export function createAudio() {
-  let ctx = null;
-  let master = null;
-  let muted = false;
-  let padNodes = null;
-  let stepFlip = false;
+  let context = null;
+  let masterBus = null;
+  let padVoices = null;
+  let isMuted = false;
+  let leftFootNext = false;
 
+  // Bring the context to life (or wake it) and start the room tone.
   function unlock() {
-    if (ctx) {
-      if (ctx.state === 'suspended') ctx.resume();
+    if (context) {
+      if (context.state === 'suspended') context.resume();
       return;
     }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    ctx = new AC();
-    master = ctx.createGain();
-    master.gain.value = muted ? 0 : 0.5;
-    master.connect(ctx.destination);
-    startPad();
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return;
+    context = new AudioCtor();
+    masterBus = context.createGain();
+    masterBus.gain.value = isMuted ? 0 : 0.5;
+    masterBus.connect(context.destination);
+    startRoomPad();
   }
 
-  function tone(freqA, freqB, dur, type, vol, when = 0) {
-    if (!ctx || muted) return;
-    const t0 = ctx.currentTime + when;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freqA, t0);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(30, freqB), t0 + dur);
-    gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(vol, t0 + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.05);
+  // One pitched voice: a glide from freqFrom to freqTo under a quick-attack,
+  // exponential-decay envelope. Nearly every sound in the game is this.
+  function voice(freqFrom, freqTo, seconds, wave, volume, delay = 0) {
+    if (!context || isMuted) return;
+    const start = context.currentTime + delay;
+    const osc = context.createOscillator();
+    const envelope = context.createGain();
+    osc.type = wave;
+    osc.frequency.setValueAtTime(freqFrom, start);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, freqTo), start + seconds);
+    envelope.gain.setValueAtTime(0, start);
+    envelope.gain.linearRampToValueAtTime(volume, start + 0.012);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + seconds);
+    osc.connect(envelope);
+    envelope.connect(masterBus);
+    osc.start(start);
+    osc.stop(start + seconds + 0.05);
   }
 
-  function noiseBurst(dur, vol, freq, when = 0) {
-    if (!ctx || muted) return;
-    const t0 = ctx.currentTime + when;
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
-    const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    const filter = ctx.createBiquadFilter();
+  // One noise voice: a buffer of white noise decaying linearly, low-passed.
+  // Footsteps are this and nothing else — the filter pitch sells the surface.
+  function noiseVoice(seconds, volume, filterFreq, delay = 0) {
+    if (!context || isMuted) return;
+    const start = context.currentTime + delay;
+    const sampleCount = Math.max(1, Math.floor(context.sampleRate * seconds));
+    const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+    const samples = buffer.getChannelData(0);
+    for (let i = 0; i < sampleCount; i++) {
+      samples[i] = (Math.random() * 2 - 1) * (1 - i / sampleCount);
+    }
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    const filter = context.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = freq;
-    const gain = ctx.createGain();
-    gain.gain.value = vol;
-    src.connect(filter);
+    filter.frequency.value = filterFreq;
+    const gain = context.createGain();
+    gain.gain.value = volume;
+    source.connect(filter);
     filter.connect(gain);
-    gain.connect(master);
-    src.start(t0);
+    gain.connect(masterBus);
+    source.start(start);
   }
 
-  // A very quiet two-oscillator pad that sits under the whole heist.
-  function startPad() {
-    if (!ctx || padNodes) return;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.035;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 420;
-    const oscA = ctx.createOscillator();
-    oscA.type = 'sine';
-    oscA.frequency.value = 110;
-    const oscB = ctx.createOscillator();
-    oscB.type = 'sine';
-    oscB.frequency.value = 164.8;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.012;
-    lfo.connect(lfoGain);
-    lfoGain.connect(gain.gain);
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    oscA.start();
-    oscB.start();
-    lfo.start();
-    padNodes = { oscA, oscB, lfo, gain };
+  // The room itself: two detuned sines breathing through a dark filter,
+  // quiet enough to forget — until it stops.
+  function startRoomPad() {
+    if (!context || padVoices) return;
+    const padGain = context.createGain();
+    padGain.gain.value = 0.035;
+    const padFilter = context.createBiquadFilter();
+    padFilter.type = 'lowpass';
+    padFilter.frequency.value = 420;
+
+    const root = context.createOscillator();
+    root.type = 'sine';
+    root.frequency.value = 110;
+    const fifth = context.createOscillator();
+    fifth.type = 'sine';
+    fifth.frequency.value = 164.8;
+
+    const breath = context.createOscillator();
+    breath.frequency.value = 0.07;
+    const breathDepth = context.createGain();
+    breathDepth.gain.value = 0.012;
+    breath.connect(breathDepth);
+    breathDepth.connect(padGain.gain);
+
+    root.connect(padFilter);
+    fifth.connect(padFilter);
+    padFilter.connect(padGain);
+    padGain.connect(masterBus);
+    root.start();
+    fifth.start();
+    breath.start();
+    padVoices = { root, fifth, breath, padGain };
+  }
+
+  // A phrase is a list of [note, seconds, wave, volume, delay] voices rung
+  // in sequence — the game's whole vocabulary of chimes and alarms.
+  function playPhrase(notes) {
+    for (const [freq, seconds, wave, volume, delay] of notes) {
+      voice(freq, freq, seconds, wave, volume, delay);
+    }
   }
 
   return {
     unlock,
-    get muted() { return muted; },
+
+    get muted() {
+      return isMuted;
+    },
+
     toggleMute() {
-      muted = !muted;
-      if (master) master.gain.value = muted ? 0 : 0.5;
-      return muted;
+      isMuted = !isMuted;
+      if (masterBus) masterBus.gain.value = isMuted ? 0 : 0.5;
+      return isMuted;
     },
+
+    // Alternating feet, left slightly brighter than right. Running is
+    // louder and duller — more paw, more marble.
     footstep(running) {
-      stepFlip = !stepFlip;
-      noiseBurst(running ? 0.07 : 0.05, running ? 0.10 : 0.05, stepFlip ? 700 : 520);
+      leftFootNext = !leftFootNext;
+      const pitch = leftFootNext ? 700 : 520;
+      if (running) noiseVoice(0.07, 0.1, pitch);
+      else noiseVoice(0.05, 0.05, pitch);
     },
+
     pickup() {
-      tone(880, 880, 0.09, 'sine', 0.16);
-      tone(1318, 1318, 0.14, 'sine', 0.14, 0.07);
+      playPhrase([
+        [880, 0.09, 'sine', 0.16, 0],
+        [1318, 0.14, 'sine', 0.14, 0.07],
+      ]);
     },
+
     loot() {
-      tone(660, 660, 0.07, 'triangle', 0.14);
-      tone(990, 990, 0.1, 'triangle', 0.12, 0.05);
+      playPhrase([
+        [660, 0.07, 'triangle', 0.14, 0],
+        [990, 0.1, 'triangle', 0.12, 0.05],
+      ]);
     },
+
+    // The rising suspicion tick a guard makes while his meter fills.
     tick() {
-      tone(1560, 1400, 0.04, 'square', 0.05);
+      voice(1560, 1400, 0.04, 'square', 0.05);
     },
+
+    // Two rising glides — the sound of a quiet night going wrong.
     alert() {
-      tone(220, 440, 0.16, 'sawtooth', 0.16);
-      tone(440, 587, 0.2, 'sawtooth', 0.12, 0.1);
+      voice(220, 440, 0.16, 'sawtooth', 0.16);
+      voice(440, 587, 0.2, 'sawtooth', 0.12, 0.1);
     },
+
     complete() {
-      tone(523, 523, 0.12, 'triangle', 0.15);
-      tone(659, 659, 0.12, 'triangle', 0.15, 0.1);
-      tone(784, 784, 0.2, 'triangle', 0.15, 0.2);
+      playPhrase([
+        [523, 0.12, 'triangle', 0.15, 0],
+        [659, 0.12, 'triangle', 0.15, 0.1],
+        [784, 0.2, 'triangle', 0.15, 0.2],
+      ]);
     },
+
     win() {
-      const notes = [523, 659, 784, 1046, 784, 1046];
-      notes.forEach((n, i) => tone(n, n, 0.16, 'triangle', 0.15, i * 0.11));
+      const melody = [523, 659, 784, 1046, 784, 1046];
+      melody.forEach((note, i) => voice(note, note, 0.16, 'triangle', 0.15, i * 0.11));
     },
+
     lose() {
-      tone(392, 392, 0.16, 'sawtooth', 0.12);
-      tone(330, 330, 0.16, 'sawtooth', 0.12, 0.14);
-      tone(262, 196, 0.34, 'sawtooth', 0.13, 0.28);
+      playPhrase([
+        [392, 0.16, 'sawtooth', 0.12, 0],
+        [330, 0.16, 'sawtooth', 0.12, 0.14],
+      ]);
+      voice(262, 196, 0.34, 'sawtooth', 0.13, 0.28);
     },
   };
 }

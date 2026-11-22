@@ -1,93 +1,115 @@
-// vision.js — geometry for sight: segment/rect tests, line of sight through
-// the hall's solids, vision-cone membership, and circle movement with sliding.
+// vision.js — the geometry of being seen. Three questions live here: does a
+// sight line cross a solid, does a point fall inside a guard's flashlight
+// cone, and how fast should suspicion grow when it does. Movement collision
+// lives here too, because sliding along the furniture is the same geometry.
 
-import { GUARD, clamp, distance } from './config.js';
+import { GUARD, angleDelta, clamp, distance } from './config.js';
 
-// Does segment (x1,y1)-(x2,y2) touch or cross rect r? Uses slab clipping.
+// Sight lines stop a hair inside each solid's face. Without the shrink, a
+// guard pressed against one side of a display case would be blind to a cat
+// pressed against the other — touching the glass should not grant invisibility.
+const SIGHT_SHRINK_PX = 2;
+
+// One axis of the slab test: narrow the [enter, leave] window of the segment
+// against this axis's pair of planes, or report a clean miss.
+function clipSlab(origin, delta, lo, hi, window) {
+  if (Math.abs(delta) < 1e-9) {
+    // Parallel to the slab: the whole segment sits inside it, or never enters.
+    return origin >= lo && origin <= hi;
+  }
+  let enter = (lo - origin) / delta;
+  let leave = (hi - origin) / delta;
+  if (enter > leave) {
+    const swap = enter;
+    enter = leave;
+    leave = swap;
+  }
+  window.enter = Math.max(window.enter, enter);
+  window.leave = Math.min(window.leave, leave);
+  return window.enter <= window.leave;
+}
+
+// Does the segment (x1, y1) -> (x2, y2) touch or cross rect r?
 export function segmentHitsRect(x1, y1, x2, y2, r) {
-  let tMin = 0;
-  let tMax = 1;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  if (Math.abs(dx) < 1e-9) {
-    if (x1 < r.x || x1 > r.x + r.w) return false;
-  } else {
-    let t1 = (r.x - x1) / dx;
-    let t2 = (r.x + r.w - x1) / dx;
-    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
-    tMin = Math.max(tMin, t1);
-    tMax = Math.min(tMax, t2);
-    if (tMin > tMax) return false;
-  }
-  if (Math.abs(dy) < 1e-9) {
-    if (y1 < r.y || y1 > r.y + r.h) return false;
-  } else {
-    let t1 = (r.y - y1) / dy;
-    let t2 = (r.y + r.h - y1) / dy;
-    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
-    tMin = Math.max(tMin, t1);
-    tMax = Math.min(tMax, t2);
-    if (tMin > tMax) return false;
-  }
+  const window = { enter: 0, leave: 1 };
+  if (!clipSlab(x1, x2 - x1, r.x, r.x + r.w, window)) return false;
+  if (!clipSlab(y1, y2 - y1, r.y, r.y + r.h, window)) return false;
   return true;
 }
 
-// Clear sight line between two points, blocked by any solid rect.
-// The endpoints' own cells are forgiving: a rect only blocks if the segment
-// passes through its interior shrunk by a small margin, so standing right
-// against a display case does not blind a guard to the player beside it.
+// An unobstructed straight line between two points, against every solid.
 export function lineOfSight(x1, y1, x2, y2, solids) {
-  for (const s of solids) {
-    const shrunk = { x: s.x + 2, y: s.y + 2, w: s.w - 4, h: s.h - 4 };
-    if (shrunk.w <= 0 || shrunk.h <= 0) continue;
-    if (segmentHitsRect(x1, y1, x2, y2, shrunk)) return false;
+  for (const solid of solids) {
+    const inner = {
+      x: solid.x + SIGHT_SHRINK_PX,
+      y: solid.y + SIGHT_SHRINK_PX,
+      w: solid.w - SIGHT_SHRINK_PX * 2,
+      h: solid.h - SIGHT_SHRINK_PX * 2,
+    };
+    if (inner.w <= 0 || inner.h <= 0) continue; // too thin to hide behind
+    if (segmentHitsRect(x1, y1, x2, y2, inner)) return false;
   }
   return true;
 }
 
-// Is the target inside the guard's vision cone (range + angle + sight line)?
+// Range first, then the cone's angular gate, then the sight line itself.
+// Very close targets skip the angle test: a guard feels a cat at his boots
+// no matter which way the flashlight points.
 export function guardSeesPoint(guard, tx, ty, solids) {
-  const d = distance(guard.x, guard.y, tx, ty);
-  if (d > GUARD.coneRange) return false;
-  if (d > 24) {
-    const ang = Math.atan2(ty - guard.y, tx - guard.x);
-    let diff = Math.abs(((ang - guard.angle) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
-    if (diff > GUARD.coneHalfAngle) return false;
-  }
+  const gap = distance(guard.x, guard.y, tx, ty);
+  if (gap > GUARD.coneRange) return false;
+  if (gap > 24 && !insideConeSweep(guard, tx, ty)) return false;
   return lineOfSight(guard.x, guard.y, tx, ty, solids);
 }
 
-// Detection fill rate per second for a guard who can see the player.
-// Close, lit and upright fills fast; far, shadowed and sneaking fills slowly.
+// Is the target within the cone's half-angle of the guard's facing?
+export function insideConeSweep(guard, tx, ty) {
+  const bearing = Math.atan2(ty - guard.y, tx - guard.x);
+  const offAxis = Math.abs(angleDelta(guard.angle, bearing));
+  return offAxis <= GUARD.coneHalfAngle;
+}
+
+// How much of the cone's length lies between guard and target, 0..1.
+// The renderer and the detection maths share this so what the player sees
+// (a cone that brightens as it closes in) matches what the guard feels.
+export function coneReachFraction(guard, tx, ty) {
+  return clamp(1 - distance(guard.x, guard.y, tx, ty) / GUARD.coneRange, 0, 1);
+}
+
+// Suspicion gained per second while the player stands in the beam.
+// Close, upright and floodlit is a disaster; far away, low and wrapped in
+// carpet shadow, a guard's meter barely crawls.
 export function detectionMeterRises(guard, player, inShadow) {
-  const d = distance(guard.x, guard.y, player.x, player.y);
-  const proximity = clamp(1 - d / GUARD.coneRange, 0, 1);
-  let rate = 0.55 + 1.5 * proximity;
+  let rate = 0.55 + 1.5 * coneReachFraction(guard, player.x, player.y);
   if (player.gait === 'run') rate *= 1.5;
   else if (player.gait === 'sneak') rate *= 0.45;
   if (inShadow) rate *= 0.35;
   return rate;
 }
 
-// Move a circle by (dx, dy), sliding along solid rects. Axis-separated so
-// actors glide around corners instead of sticking to them.
+// Move a round body by (dx, dy), sliding along solid rects. The axes are
+// resolved one at a time so actors glide around corners instead of sticking.
 export function slideMove(body, dx, dy, solids) {
   body.x += dx;
-  for (const s of solids) pushOut(body, s, 'x');
+  for (const solid of solids) pushOutOfRect(body, solid, 'x');
   body.y += dy;
-  for (const s of solids) pushOut(body, s, 'y');
+  for (const solid of solids) pushOutOfRect(body, solid, 'y');
 }
 
-function pushOut(body, s, axis) {
-  const r = body.radius;
-  const nearestX = clamp(body.x, s.x, s.x + s.w);
-  const nearestY = clamp(body.y, s.y, s.y + s.h);
-  const ddx = body.x - nearestX;
-  const ddy = body.y - nearestY;
-  if (ddx * ddx + ddy * ddy >= r * r) return;
+// If the body's circle overlaps the rect, shove it out along one axis,
+// landing on whichever face it approached from.
+function pushOutOfRect(body, rect, axis) {
+  const radius = body.radius;
+  const nearestX = clamp(body.x, rect.x, rect.x + rect.w);
+  const nearestY = clamp(body.y, rect.y, rect.y + rect.h);
+  const offX = body.x - nearestX;
+  const offY = body.y - nearestY;
+  if (offX * offX + offY * offY >= radius * radius) return; // no overlap
   if (axis === 'x') {
-    body.x = body.x < s.x + s.w / 2 ? s.x - r : s.x + s.w + r;
+    const centreX = rect.x + rect.w / 2;
+    body.x = body.x < centreX ? rect.x - radius : rect.x + rect.w + radius;
   } else {
-    body.y = body.y < s.y + s.h / 2 ? s.y - r : s.y + s.h + r;
+    const centreY = rect.y + rect.h / 2;
+    body.y = body.y < centreY ? rect.y - radius : rect.y + rect.h + radius;
   }
 }
