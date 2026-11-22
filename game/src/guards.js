@@ -4,7 +4,7 @@
 // gives up and walks back to his route.
 
 import { GUARD, clamp, distance, turnToward } from './config.js';
-import { inCone, detectionRate, slideMove } from './vision.js';
+import { guardSeesPoint, detectionMeterRises, slideMove } from './vision.js';
 
 export function createGuard(def, index) {
   const first = def.route[0];
@@ -57,7 +57,7 @@ function nearestWaypoint(g) {
   return best;
 }
 
-export function hearNoise(g, x, y) {
+export function guardHearsNoise(g, x, y) {
   if (g.state === 'chase') return;
   g.stimulus = { x, y };
   g.meter = Math.max(g.meter, GUARD.suspiciousAt + 0.08);
@@ -66,11 +66,11 @@ export function hearNoise(g, x, y) {
 
 export function updateGuard(g, dt, world) {
   const { player, solids } = world;
-  const sees = inCone(g, player.x, player.y, solids);
+  const sees = guardSeesPoint(g, player.x, player.y, solids);
   g.seesPlayer = sees;
 
   if (sees) {
-    const rate = detectionRate(g, player, player.inShadow);
+    const rate = detectionMeterRises(g, player, player.inShadow);
     g.meter = clamp(g.meter + rate * dt, 0, 1);
     g.lastSeen = { x: player.x, y: player.y };
     g.stimulus = { x: player.x, y: player.y };

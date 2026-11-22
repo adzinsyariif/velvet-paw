@@ -18,7 +18,7 @@ export function borderSolids() {
 
 export const LEVELS = [
   {
-    name: 'The East Wing',
+    name: 'I. The East Wing',
     sub: 'Level 1 · Two guards, wide halls',
     tip: 'Hold SHIFT to sneak. Carpets are shadow: you are harder to see on them.',
     start: { x: 130, y: 660 },
@@ -60,7 +60,7 @@ export const LEVELS = [
     ],
   },
   {
-    name: 'Hall of Statues',
+    name: 'II. The Hall of Statues',
     sub: 'Level 2 · Three guards, crossing patrols',
     tip: 'A guard with a ? is suspicious. Break line of sight and let his meter fall.',
     start: { x: 120, y: 120 },
@@ -108,7 +108,7 @@ export const LEVELS = [
     ],
   },
   {
-    name: 'The Vault Rotunda',
+    name: 'III. The Vault Rotunda',
     sub: 'Level 3 · Four guards, one gem, no mercy',
     tip: 'The rotunda carpet is your friend. Cross the marble only when cones turn away.',
     start: { x: 130, y: 680 },

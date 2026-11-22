@@ -46,7 +46,7 @@ export function lineOfSight(x1, y1, x2, y2, solids) {
 }
 
 // Is the target inside the guard's vision cone (range + angle + sight line)?
-export function inCone(guard, tx, ty, solids) {
+export function guardSeesPoint(guard, tx, ty, solids) {
   const d = distance(guard.x, guard.y, tx, ty);
   if (d > GUARD.coneRange) return false;
   if (d > 24) {
@@ -59,7 +59,7 @@ export function inCone(guard, tx, ty, solids) {
 
 // Detection fill rate per second for a guard who can see the player.
 // Close, lit and upright fills fast; far, shadowed and sneaking fills slowly.
-export function detectionRate(guard, player, inShadow) {
+export function detectionMeterRises(guard, player, inShadow) {
   const d = distance(guard.x, guard.y, player.x, player.y);
   const proximity = clamp(1 - d / GUARD.coneRange, 0, 1);
   let rate = 0.55 + 1.5 * proximity;

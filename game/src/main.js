@@ -6,12 +6,12 @@ import { LEVELS, levelSolids } from './levels.js';
 import { createAudio } from './audio.js';
 import { attachInput, pressed, endFrame } from './input.js';
 import { createPlayer, updatePlayer, nearestInteract } from './player.js';
-import { createGuard, updateGuard, hearNoise } from './guards.js';
+import { createGuard, updateGuard, guardHearsNoise } from './guards.js';
 import { drawScene } from './render.js';
 import {
   drawHud, drawTitle, drawPause, drawBusted, drawLevelComplete, drawVictory,
 } from './hud.js';
-import { readShot, stageShot } from './shots.js';
+import { readScreenshotRequest, stageScreenshotScene } from './shots.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -111,7 +111,7 @@ function stepPlay(dt) {
   if (game.player.noise) {
     for (const g of game.guards) {
       if (distance(g.x, g.y, game.player.noise.x, game.player.noise.y) <= game.player.noise.r) {
-        hearNoise(g, game.player.noise.x, game.player.noise.y);
+        guardHearsNoise(g, game.player.noise.x, game.player.noise.y);
       }
     }
   }
@@ -213,10 +213,10 @@ function draw() {
 }
 
 loadLevel(0);
-const shot = readShot();
+const shot = readScreenshotRequest();
 if (shot) {
   if (shot.name === 'end') loadLevel(LEVELS.length - 1);
-  stageShot(game, shot);
+  stageScreenshotScene(game, shot);
 }
 
 attachInput(() => sfx.unlock());

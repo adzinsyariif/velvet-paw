@@ -4,10 +4,64 @@
 
 import { PALETTE, HUD_H, VIEW } from './config.js';
 
-function fmtTime(sec) {
+function formatClock(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// The museum's alarm eye: a brass emblem hanging below the top bar that
+// opens and fills with the most-alert guard's meter — calm brass, amber
+// when a guard is suspicious, wide and red at a full chase.
+export function drawDetectionEye(ctx, game) {
+  let maxMeter = 0;
+  let anyChase = false;
+  for (const g of game.guards) {
+    if (g.meter > maxMeter) maxMeter = g.meter;
+    if (g.state === 'chase') anyChase = true;
+  }
+  if (anyChase) maxMeter = 1;
+  const cx = VIEW.w / 2;
+  const cy = HUD_H + 30;
+  const open = 0.35 + 0.65 * maxMeter;
+  ctx.save();
+  // Hanging mount from the bar.
+  ctx.strokeStyle = PALETTE.brass;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, HUD_H);
+  ctx.lineTo(cx, cy - 13);
+  ctx.stroke();
+  ctx.fillStyle = PALETTE.brass;
+  ctx.beginPath();
+  ctx.arc(cx, cy - 14, 3, 0, Math.PI * 2);
+  ctx.fill();
+  // Almond outline.
+  ctx.beginPath();
+  ctx.moveTo(cx - 30, cy);
+  ctx.quadraticCurveTo(cx, cy - 26 * open, cx + 30, cy);
+  ctx.quadraticCurveTo(cx, cy + 26 * open, cx - 30, cy);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(8, 10, 20, 0.88)';
+  ctx.fill();
+  ctx.strokeStyle = PALETTE.brass;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Iris fills with the meter; the pupil is Velvet's silhouette colour.
+  const irisR = 6 + 5 * maxMeter;
+  ctx.beginPath();
+  ctx.arc(cx, cy, irisR, 0, Math.PI * 2);
+  ctx.fillStyle = anyChase || maxMeter > 0.85
+    ? PALETTE.danger
+    : maxMeter >= 0.3
+      ? PALETTE.warn
+      : PALETTE.brass;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, irisR * 0.45, 0, Math.PI * 2);
+  ctx.fillStyle = '#141021';
+  ctx.fill();
+  ctx.restore();
 }
 
 export function drawHud(ctx, game) {
@@ -16,6 +70,8 @@ export function drawHud(ctx, game) {
   ctx.fillRect(0, 0, VIEW.w, HUD_H);
   ctx.fillStyle = PALETTE.caseTrim;
   ctx.fillRect(0, HUD_H - 2, VIEW.w, 2);
+  ctx.fillStyle = 'rgba(201, 162, 39, 0.45)';
+  ctx.fillRect(0, HUD_H - 5, VIEW.w, 1);
 
   ctx.textAlign = 'left';
   ctx.fillStyle = PALETTE.ink;
@@ -42,7 +98,7 @@ export function drawHud(ctx, game) {
   ctx.font = 'bold 15px system-ui, sans-serif';
   const lootTotal = level.loots.length;
   ctx.fillText(
-    `◆ ${game.taken.loots.size}/${lootTotal}   SCORE ${game.score}   ⏱ ${fmtTime(game.levelTime)}   ${game.muted ? '🔇' : '♪'}`,
+    `◆ ${game.taken.loots.size}/${lootTotal}   SCORE ${game.score}   ⏱ ${formatClock(game.levelTime)}   ${game.muted ? '🔇' : '♪'}`,
     VIEW.w - 18,
     35,
   );
@@ -66,6 +122,8 @@ export function drawHud(ctx, game) {
     ctx.fillText(label, game.player.x, y + 1);
   }
 
+  if (game.mode === 'play') drawDetectionEye(ctx, game);
+
   // Flash message (locked exit, gem taken, and so on).
   if (game.message && game.message.t > 0) {
     ctx.textAlign = 'center';
@@ -75,16 +133,27 @@ export function drawHud(ctx, game) {
   }
 }
 
-function panel(ctx, w, h) {
+function panel(ctx, w, h, dimAlpha = 0.66) {
+  // An engraved museum plaque: dark walnut-navy plate, a double brass
+  // border and a brass rosette in each corner.
   const x = (VIEW.w - w) / 2;
   const y = (VIEW.h - h) / 2;
-  ctx.fillStyle = 'rgba(3, 4, 10, 0.66)';
+  ctx.fillStyle = `rgba(3, 4, 10, ${dimAlpha})`;
   ctx.fillRect(0, 0, VIEW.w, VIEW.h);
-  ctx.fillStyle = 'rgba(10, 13, 26, 0.95)';
+  ctx.fillStyle = 'rgba(13, 11, 24, 0.97)';
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = PALETTE.caseTrim;
+  ctx.strokeStyle = PALETTE.brass;
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(201, 162, 39, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 5, y + 5, w - 10, h - 10);
+  ctx.fillStyle = PALETTE.brass;
+  for (const [cx, cy] of [[x + 13, y + 13], [x + w - 13, y + 13], [x + 13, y + h - 13], [x + w - 13, y + h - 13]]) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
   return { x, y, w, h };
 }
 
@@ -96,7 +165,7 @@ function centreText(ctx, text, y, font, colour) {
 }
 
 export function drawTitle(ctx, game) {
-  const p = panel(ctx, 700, 470);
+  const p = panel(ctx, 700, 470, 0.42);
   const cy = p.y;
   centreText(ctx, '🐾  VELVET PAW', cy + 78, 'bold 52px Georgia, serif', PALETTE.gold);
   centreText(ctx, 'a tiny stealth caper in the Moonlit Museum', cy + 112, 'italic 17px Georgia, serif', PALETTE.inkDim);
@@ -112,8 +181,9 @@ export function drawTitle(ctx, game) {
     'Stay out of the cones. Carpet is shadow. Noise pulls guards toward you.',
   ];
   controls.forEach((line, i) => centreText(ctx, line, cy + 262 + i * 24, '14.5px system-ui, sans-serif', PALETTE.inkDim));
-  centreText(ctx, game.level.tip, cy + 356, 'italic 14.5px system-ui, sans-serif', PALETTE.warn);
-  centreText(ctx, 'Press ENTER to slip inside', cy + 408, 'bold 19px system-ui, sans-serif', '#5affaa');
+  centreText(ctx, 'Tonight:  I. The East Wing  ·  II. The Hall of Statues  ·  III. The Vault Rotunda', cy + 340, 'italic 14.5px Georgia, serif', PALETTE.brassBright);
+  centreText(ctx, game.level.tip, cy + 368, 'italic 14.5px system-ui, sans-serif', PALETTE.warn);
+  centreText(ctx, 'Press ENTER to slip inside', cy + 414, 'bold 19px system-ui, sans-serif', '#5affaa');
 }
 
 export function drawPause(ctx) {
@@ -138,7 +208,7 @@ export function drawLevelComplete(ctx, game) {
   centreText(ctx, `${game.level.name} is behind you.`, p.y + 112, 'italic 15.5px Georgia, serif', PALETTE.ink);
   const lines = [
     `Loot pocketed: ${game.taken.loots.size} of ${game.level.loots.length}`,
-    `Time in hall: ${fmtTime(game.levelTime)}`,
+    `Time in hall: ${formatClock(game.levelTime)}`,
     `Times spotted: ${game.spotted}`,
     `Score: ${game.score}`,
   ];
@@ -152,8 +222,9 @@ export function drawVictory(ctx, game) {
   centreText(ctx, 'Three halls, one cat, zero arrests worth mentioning.', p.y + 116, 'italic 15.5px Georgia, serif', PALETTE.ink);
   const lines = [
     `Final score: ${game.score}`,
-    `Loot across the night: ${game.totalLoot} pieces`,
-    `Total time: ${fmtTime(game.totalTime)} · Times spotted: ${game.totalSpotted}`,
+    `The Moon Gem: pocketed ◆`,
+    `Loot across the night: ${game.totalLoot} of 12 pieces`,
+    `Total time: ${formatClock(game.totalTime)} · Times spotted: ${game.totalSpotted}`,
     game.totalSpotted === 0 ? 'A ghost. The museum will never know.' : 'The guards will dine out on this story for weeks.',
   ];
   lines.forEach((line, i) => centreText(ctx, line, p.y + 162 + i * 27, '16.5px system-ui, sans-serif', PALETTE.inkDim));

@@ -35,5 +35,9 @@ writeFileSync(join(out, 'dossier.json'), dossier);
 // A short hand-in summary, so a human running this sees what was handed over.
 const gameFiles = readdirSync(join(out, 'game'), { recursive: true }).length;
 const shotFiles = readdirSync(join(out, 'screenshots'));
+const shotKb = shotFiles.reduce(
+  (sum, name) => sum + statSync(join(out, 'screenshots', name)).size,
+  0,
+) / 1024;
 const dossierKb = (statSync(join(out, 'dossier.json')).size / 1024).toFixed(1);
-console.log(`Velvet Paw handed in: ${gameFiles} game files, ${shotFiles.length} screenshots (${shotFiles.join(', ')}), dossier.json ${dossierKb} KiB -> ${out}`);
+console.log(`Velvet Paw handed in: ${gameFiles} game files, ${shotFiles.length} screenshots (${[...shotFiles].sort().join(', ')}, ${shotKb.toFixed(1)} KiB in all), dossier.json ${dossierKb} KiB -> ${out}`);
